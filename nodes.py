@@ -33,7 +33,7 @@ from .resampler import Resampler
 folder_paths.add_model_folder_path("infinite_you", os.path.join(folder_paths.models_dir, "infinite_you"))
 
 class FaceDetector:
-    def __init__(self, 
+    def __init__(self,
                  det_sizes,
                  root_dir,
                  providers) -> None:
@@ -92,7 +92,7 @@ class IDEmbeddingModelLoader:
             dst_dir = os.path.dirname(image_proj_model_path)
             os.makedirs(dst_dir, exist_ok=True)
 
-            downloaded_file = hf_hub_download(repo_id="ByteDance/InfiniteYou", 
+            downloaded_file = hf_hub_download(repo_id="ByteDance/InfiniteYou",
                             filename=escape_path_for_url(os.path.join("infu_flux_v1.0", image_proj_model_name)),
                             local_dir=infinite_you_dir)
             shutil.move(downloaded_file, image_proj_model_path)
@@ -146,7 +146,7 @@ class ExtractFacePoseImage:
                 "mask": ("MASK", ),
             }
         }
-    
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "extract_face_pose"
     CATEGORY = "infinite_you"
@@ -160,14 +160,14 @@ class ExtractFacePoseImage:
             mask_3ch = np.repeat(mask_3ch, 3, axis=-1)  # Shape: (H, W, 3)
             np_image = np_image * mask_3ch
 
-        pil_image = resize_and_pad_pil_image(Image.fromarray(np_image), (width, height))        
+        pil_image = resize_and_pad_pil_image(Image.fromarray(np_image), (width, height))
         face_info = face_detector(cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR))
         if len(face_info) == 0:
             raise ValueError('No face detected in the input pose image')
-        
+
         face_info = sorted(face_info, key=lambda x:(x['bbox'][2]-x['bbox'][0])*(x['bbox'][3]-x['bbox'][1]))[-1] # only use the maximum face
         pil_image = draw_kps(pil_image, face_info['kps'])
-        
+
         return (np_image_to_tensor(np.array(pil_image)).unsqueeze(0), )
 
 class ExtractIDEmbedding:
@@ -185,14 +185,14 @@ class ExtractIDEmbedding:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "extract_id_embedding"
     CATEGORY = "infinite_you"
-    
+
     def extract_id_embedding(self, face_detector, arcface_model, image_proj_model, image):
         np_image = tensor_to_np_image(image)
         id_image_cv2 = cv2.cvtColor(np_image[0], cv2.COLOR_RGB2BGR)
         face_info = face_detector(id_image_cv2)
         if len(face_info) == 0:
             raise ValueError('No face detected in the input ID image')
-        
+
         device = comfy.model_management.get_torch_device()
 
         face_info = sorted(face_info, key=lambda x:(x['bbox'][2]-x['bbox'][0])*(x['bbox'][3]-x['bbox'][1]))[-1] # only use the maximum face
@@ -207,7 +207,7 @@ class ExtractIDEmbedding:
             id_embed = id_embed.repeat(1, 1, 1)
             id_embed = id_embed.view(bs_embed * 1, seq_len, -1)
             id_embed = id_embed.to(device=device, dtype=torch.bfloat16)
-            
+
         return ({'id_embedding': id_embed}, )
 
 class InfuseNetLoader:
@@ -237,12 +237,12 @@ class InfuseNetLoader:
         if not os.path.exists(controlnet_path):
             dst_dir = os.path.dirname(controlnet_path)
             os.makedirs(dst_dir, exist_ok=True)
-            downloaded_file = hf_hub_download(repo_id="ByteDance/InfiniteYou", 
+            downloaded_file = hf_hub_download(repo_id="ByteDance/InfiniteYou",
                             filename=escape_path_for_url(os.path.join("infu_flux_v1.0", controlnet_name)),
                             local_dir=infinite_you_dir)
-            
+
             shutil.move(downloaded_file, controlnet_path)
-        
+
         controlnet = load_infuse_net_flux(controlnet_path)
         return (controlnet,)
 
@@ -281,8 +281,12 @@ class InfuseNetApply:
                 control_mask = control_mask.unsqueeze(0)
 
         control_hint = image.movedim(-1,1)
+
+        batch_size = image.shape[0]     # Get the batch_size from the image
+        id_embedding_repeated = id_embedding['id_embedding'].repeat(batch_size, 1, 1)   # Make the id_embedding tensor repeat for the batch size
+
         cnets = {}
-        
+
         out = []
         for conditioning in [positive, negative]:
             c = []
@@ -298,7 +302,7 @@ class InfuseNetApply:
                     c_net = cnets[prev_cnet]
                 else:
                     c_net = control_net.copy().set_cond_hint(control_hint, strength, (start_percent, end_percent), vae=vae, extra_concat=extra_concat)
-                    c_net.id_embedding = id_embedding['id_embedding']
+                    c_net.id_embedding = id_embedding_repeated
                     c_net.set_previous_controlnet(prev_cnet)
                     c_net.set_extra_arg("control_mask", control_mask)
                     cnets[prev_cnet] = c_net
